@@ -1,11 +1,38 @@
 import { Button } from "@/components/ui/button";
 import { Menu, X, Shield } from "lucide-react";
-import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { supabase } from '../supabaseClient';
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user || null);
+    });
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+    });
+
+    return () => {
+      authListener?.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error logging out:', error.message);
+    } else {
+      navigate('/'); // Redirect to home page after logout
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
@@ -51,11 +78,17 @@ const Header = () => {
             >
               Contact
             </Link>
-            <Link to="/contact">
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                Emergency Response
+            {user ? (
+              <Button variant="ghost" onClick={handleLogout} className="text-foreground hover:text-primary">
+                Logout
               </Button>
-            </Link>
+            ) : (
+              <Link to="/contact">
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+                  Emergency Response
+                </Button>
+              </Link>
+            )}
           </nav>
 
           {/* Mobile Menu Button */}
@@ -106,11 +139,17 @@ const Header = () => {
               >
                 Contact
               </Link>
-              <Link to="/contact" onClick={() => setIsMenuOpen(false)}>
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full">
-                  Emergency Response
+              {user ? (
+                <Button variant="ghost" onClick={handleLogout} className="text-foreground hover:text-primary w-full">
+                  Logout
                 </Button>
-              </Link>
+              ) : (
+                <Link to="/contact" onClick={() => setIsMenuOpen(false)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full">
+                    Emergency Response
+                  </Button>
+                </Link>
+              )}
             </div>
           </nav>
         )}

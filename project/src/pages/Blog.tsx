@@ -18,9 +18,20 @@ import {
   Lock, 
   Eye,
   Play,
-  Image as ImageIcon
+  ImageIcon
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Link } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
+
+interface ChatMessage {
+  id: number;
+  user_id: string; // Assuming user_id is a string (UUID)
+  content: string;
+  created_at: string;
+  // You might want to add a field for username/avatar later by joining with a user table
+  user?: { username: string; avatar?: string };
+}
 
 const Blog = () => {
   const [messages, setMessages] = useState([
@@ -48,31 +59,62 @@ const Blog = () => {
   ]);
 
   const [newMessage, setNewMessage] = useState("");
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      user: "Admin",
-      message: "Welcome to the Breaking Circuits community chat! Feel free to ask questions about cybersecurity.",
-      timestamp: "10:30 AM",
-      avatar: "AD"
-    },
-    {
-      id: 2,
-      user: "TechUser",
-      message: "Is anyone else seeing increased phishing attempts lately?",
-      timestamp: "10:45 AM",
-      avatar: "TU"
-    },
-    {
-      id: 3,
-      user: "SecAnalyst",
-      message: "Yes, we've noticed a 40% increase in our monitoring systems. Mostly targeting financial services.",
-      timestamp: "10:47 AM",
-      avatar: "SA"
-    }
-  ]);
-
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [newChatMessage, setNewChatMessage] = useState("");
+  const [user, setUser] = useState<any>(null);
+
+  // Fetch initial messages and subscribe to new messages
+  useEffect(() => {
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching messages:', error);
+      } else {
+        setChatMessages(data || []);
+      }
+    };
+
+    fetchMessages();
+
+    // Subscribe to new messages
+    const subscription = supabase
+      .channel('messages')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          console.log('New message received:', payload.new);
+          setChatMessages((prevMessages) => [...prevMessages, payload.new as ChatMessage]);
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on component unmount
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Get current user
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+    };
+    fetchUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => {
+      authListener?.unsubscribe();
+    };
+  }, []);
+
 
   const handleMessageSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,17 +130,20 @@ const Blog = () => {
     }
   };
 
-  const handleChatSubmit = (e: React.FormEvent) => {
+  const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newChatMessage.trim()) {
-      setChatMessages([...chatMessages, {
-        id: chatMessages.length + 1,
-        user: "You",
-        message: newChatMessage,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        avatar: "YU"
-      }]);
-      setNewChatMessage("");
+    if (newChatMessage.trim() && user) {
+      const { error } = await supabase
+        .from('messages')
+        .insert([
+          { user_id: user.id, content: newChatMessage },
+        ]);
+
+      if (error) {
+        console.error('Error sending message:', error);
+      } else {
+        setNewChatMessage("");
+      }
     }
   };
 
@@ -153,7 +198,7 @@ const Blog = () => {
       excerpt: "With remote work becoming permanent, securing cloud infrastructure is more critical than ever. Learn essential practices for cloud security.",
       author: "Lisa Wang",
       date: "January 5, 2025",
-      readTime: "9 min read",
+readTime: "9 min read",
       category: "Cloud Security",
       image: "https://images.pexels.com/photos/4164418/pexels-photo-4164418.jpeg?auto=compress&cs=tinysrgb&w=800",
       tags: ["Cloud Security", "Remote Work", "Best Practices"]
@@ -210,6 +255,17 @@ const Blog = () => {
               <TabsTrigger value="blog">Blog Posts</TabsTrigger>
               <TabsTrigger value="community">Message Board</TabsTrigger>
               <TabsTrigger value="chat">Live Chat</TabsTrigger>
+              {/* Auth Links */}
+              {!user && (
+                <div className="flex items-center justify-center space-x-4">
+                  <Link to="/signup">
+                    <Button variant="ghost">Sign Up</Button>
+                  </Link>
+                  <Link to="/login">
+                    <Button variant="ghost">Log In</Button>
+                  </Link>
+                </div>
+              )}
             </TabsList>
 
             {/* Blog Posts Tab */}
@@ -365,34 +421,44 @@ const Blog = () => {
                 <div className="bg-cyber-dark rounded-lg p-4 h-96 overflow-y-auto mb-4 space-y-3">
                   {chatMessages.map((message) => (
                     <div key={message.id} className="flex gap-3">
+                      {/* You'll likely want to fetch user details to display username/avatar */}
                       <Avatar className="w-8 h-8">
                         <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                          {message.avatar}
+                          {/* Display user initial or avatar */}
+                          {message.user_id.substring(0, 2)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-sm text-foreground">{message.user}</span>
-                          <span className="text-xs text-muted-foreground">{message.timestamp}</span>
+                          {/* Display username fetched from user table */}
+                          <span className="font-semibold text-sm text-foreground">{message.user?.username || message.user_id}</span>
+                          <span className="text-xs text-muted-foreground">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{message.message}</p>
+                        <p className="text-sm text-muted-foreground">{message.content}</p>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 {/* Chat Input */}
-                <form onSubmit={handleChatSubmit} className="flex gap-2">
-                  <Input
-                    placeholder="Type your message..."
-                    value={newChatMessage}
-                    onChange={(e) => setNewChatMessage(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90">
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </form>
+                {user ? (
+                  <form onSubmit={handleChatSubmit} className="flex gap-2">
+                    <Input
+                      placeholder="Type your message..."
+                      value={newChatMessage}
+                      onChange={(e) => setNewChatMessage(e.target.value)}
+                      className="flex-1"
+                      disabled={!user}
+                    />
+                    <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={!user}>
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="text-center text-muted-foreground">
+                    Please <Link to="/login" className="text-primary underline">log in</Link> or <Link to="/signup" className="text-primary underline">sign up</Link> to join the chat.
+                  </div>
+                )}
 
                 <div className="mt-4 p-3 bg-primary/10 rounded-lg border border-primary/20">
                   <p className="text-sm text-muted-foreground">
